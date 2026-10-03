@@ -12,9 +12,14 @@
  *   - Cột ghi trong `so` là SỐ; cột ghi trong `dung` là ĐÚNG/SAI (TRUE/FALSE).
  * Mọi sheet, trừ NhatKy (chỉ ghi thêm), có 4 cột hệ thống ở cuối:
  *   CapNhatLuc, CapNhatBoi, PhienBan (tăng 1 mỗi lần sửa), DaXoa (xóa mềm).
+ *
+ * Phiên bản cấu trúc
+ *   1 (bước 1, 02/10/2026): 20 sheet.
+ *   2 (bước 2, 02/10/2026): thêm LinhKienTB.TrangThaiDuyet (kỹ thuật viên đề xuất gắn linh kiện, chờ duyệt),
+ *     CongTo.NgayLap và CongTo.GhiChu. Máy chủ (Code.gs) cần phiên bản 2: dán tệp này rồi chạy lại menu ME → Cài đặt.
  */
 
-const PHIEN_BAN_CAU_TRUC = 1;
+const PHIEN_BAN_CAU_TRUC = 2;
 const MUI_GIO = 'Asia/Ho_Chi_Minh';
 const COT_HE_THONG = ['CapNhatLuc', 'CapNhatBoi', 'PhienBan', 'DaXoa'];
 
@@ -59,7 +64,8 @@ const BANG = [
     cot: ['MaTB', 'MaTS', 'TenVi', 'TenZh', 'Nhom', 'GiaTri', 'DonVi', 'ThuTu'],
     so: ['ThuTu'] },
   { ten: 'LinhKienTB', nhom: 'THIET_BI', khoa: ['MaTB', 'MaLK'],
-    cot: ['MaTB', 'MaLK', 'ViTriLapVi', 'ViTriLapZh', 'SoLuongLap', 'ChuKyThay', 'DonViChuKy', 'LanThayCuoi', 'GhiChu'],
+    cot: ['MaTB', 'MaLK', 'ViTriLapVi', 'ViTriLapZh', 'SoLuongLap', 'ChuKyThay', 'DonViChuKy', 'LanThayCuoi', 'GhiChu',
+          'TrangThaiDuyet'],
     so: ['SoLuongLap', 'ChuKyThay'] },
 
   // ── Kho linh kiện ──
@@ -99,7 +105,7 @@ const BANG = [
   // ── Điện nước ──
   { ten: 'CongTo', nhom: 'DIEN_NUOC', khoa: ['MaCT'],
     cot: ['MaCT', 'TenVi', 'TenZh', 'Loai', 'DonVi', 'KhuVuc', 'ViTri', 'MaCTCha', 'HeSoNhan', 'SoToiDa',
-          'DinhMucNgay', 'MaQR', 'TrangThai'],
+          'DinhMucNgay', 'MaQR', 'TrangThai', 'NgayLap', 'GhiChu'],
     so: ['HeSoNhan', 'SoToiDa', 'DinhMucNgay'] },
   { ten: 'ChiSo', nhom: 'DIEN_NUOC', khoa: ['MaGhi'],
     cot: ['MaGhi', 'ClientId', 'MaCT', 'GhiLuc', 'NgayTinh', 'NguoiGhi', 'ChiSoBT', 'ChiSoCD', 'ChiSoTD',
@@ -161,6 +167,7 @@ const GHI_CHU_COT = {
   'LinhKienTB.ChuKyThay': 'Chu kỳ thay, đơn vị ở cột DonViChuKy.',
   'LinhKienTB.DonViChuKy': 'GIO (giờ chạy), NGAY, TUAN, THANG hoặc NAM.',
   'LinhKienTB.LanThayCuoi': 'Ngày thay gần nhất, dạng 2026-09-28.',
+  'LinhKienTB.TrangThaiDuyet': 'CHO_DUYET = kỹ thuật viên cấp 4 đề xuất, chờ cấp 1–3 duyệt; DA_DUYET hoặc để trống = đã duyệt.',
 
   // Kho linh kiện
   'KhoLinhKien.MaLK': 'Mã vật tư theo app kho. Mã tạm do app cấp dạng TẠM-0001.',
@@ -185,10 +192,12 @@ const GHI_CHU_COT = {
   'CongTo.DinhMucNgay': 'Định mức mỗi ngày (kWh hoặc m³). Để trống thì không vẽ đường định mức.',
   'CongTo.MaQR': 'Nội dung tem QR dán trên công tơ.',
   'CongTo.TrangThai': 'DANG_DUNG, NGUNG hoặc DA_THAY.',
+  'CongTo.NgayLap': 'Ngày lắp công tơ đang dùng, dạng 2024-03-15. Thay công tơ trong app thì tự ghi.',
+  'CongTo.GhiChu': 'Ghi chú, VD biến dòng TI 200/5.',
   'ChiSo.NgayTinh': 'Ngày được tính tiêu thụ: số ghi sáng D+1 tính cho ngày D.',
   'ChiSo.ChiSoBT': 'Số trên mặt công tơ. Công tơ 1 giá và đồng hồ nước chỉ dùng cột này.',
   'ChiSo.HeSoDung': 'Hệ số nhân đã dùng khi tính lần ghi này.',
-  'ChiSo.Co': 'BINH_THUONG, BAT_THUONG, GOP hoặc THAY_CONG_TO.',
+  'ChiSo.Co': 'BINH_THUONG, BAT_THUONG, GOP hoặc THAY_CONG_TO. Dòng thay công tơ: chỉ số là số đầu của công tơ mới, tiêu thụ là phần của công tơ cũ.',
   'BieuGia.Loai': 'DIEN_BT, DIEN_CD, DIEN_TD hoặc NUOC.',
   'BieuGia.DonGia': 'Đơn giá: đồng/kWh với điện, đồng/m³ với nước. Để trống thì app ẩn chi phí.',
   'BieuGia.TuNgay': 'Ngày bắt đầu áp dụng, dạng 2026-10-01.',

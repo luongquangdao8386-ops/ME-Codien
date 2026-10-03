@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiểm tra máy chủ ME</title>
+<style>
+  :root {
+    --band: #1B365D; --band-sub: #C9D6E8; --yellow: #FFC72C; --on-yellow: #1B365D;
+    --bg: #F2F4F7; --surface: #FFFFFF; --line: #E4E7EC; --fg: #101828; --fg-2: #475467; --fg-3: #667085;
+    --ok-fg: #0B6234; --ok-bg: #E3F6EB; --bad-fg: #A3141D; --bad-bg: #FDECEC; --wait-fg: #8A3E00; --wait-bg: #FFF1E0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, 'Segoe UI', Roboto, sans-serif; }
+  header { background: var(--band); color: #fff; padding: 22px 20px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; color: var(--band-sub); max-width: 64ch; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .the { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 14px; }
+  label span { font-weight: 400; color: var(--fg-3); font-size: 13px; }
+  input { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid #D0D5DD; border-radius: 10px; width: 100%; }
+  .hang { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button { font: inherit; font-weight: 700; min-height: 46px; padding: 0 18px; border: 0; border-radius: 12px; cursor: pointer; background: var(--yellow); color: var(--on-yellow); }
+  button:disabled { opacity: .55; cursor: default; }
+  ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: 76px 1fr; gap: 10px; align-items: start; }
+  .nhan { font-size: 12.5px; font-weight: 700; border-radius: 8px; padding: 2px 8px; text-align: center; }
+  .dat { background: var(--ok-bg); color: var(--ok-fg); }
+  .loi { background: var(--bad-bg); color: var(--bad-fg); }
+  .cho { background: var(--wait-bg); color: var(--wait-fg); }
+  .mo-ta b { display: block; }
+  .mo-ta div { color: var(--fg-2); font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+  .an { display: none; }
+  .nho { color: var(--fg-3); font-size: 13px; }
+  @media (max-width: 520px) { .hang { grid-template-columns: 1fr; } li { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kiểm tra máy chủ ME</h1>
+  <p>Gọi thử Web App vừa triển khai: đăng nhập bằng mã NV + PIN, đổi PIN lần đầu, tải dữ liệu, đồng bộ. Mở tệp này bằng Chrome trên máy tính.</p>
+</header>
+<main>
+  <section class="the">
+    <label>Địa chỉ Web App<span>Link kết thúc bằng /exec, chép ở bước Triển khai.</span>
+      <input id="url" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></label>
+    <div class="hang">
+      <label>Mã nhân viên<input id="maNV" autocomplete="username" placeholder="NV001"></label>
+      <label>PIN (6 số)<input id="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password"></label>
+    </div>
+    <button id="chay" type="button">Kiểm tra</button>
+    <p class="nho">Tệp chỉ nhớ địa chỉ Web App và mã NV trên máy này, không lưu PIN hay phiên đăng nhập.</p>
+  </section>
+
+  <section id="doiPin" class="the an">
+    <b>Lần đầu đăng nhập: đặt PIN của riêng bạn</b>
+    <p class="nho">6 số, không dùng dãy dễ đoán như 000000, 123456, 121212.</p>
+    <div class="hang">
+      <label>PIN mới<input id="pinMoi" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
+      <label>Nhập lại PIN mới<input id="pinMoi2" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
+    </div>
+    <button id="luuPin" type="button">Đổi PIN và kiểm tra tiếp</button>
+  </section>
+
+  <section class="the">
+    <b>Kết quả</b>
+    <ol id="ketQua"><li><span class="nhan cho">Chờ</span><div class="mo-ta"><b>Chưa chạy</b><div>Điền địa chỉ, mã NV, PIN rồi bấm Kiểm tra.</div></div></li></ol>
+  </section>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var luu = function (k, v) { try { localStorage.setItem('me-kt-' + k, v); } catch (e) {} };
+  var doc = function (k) { try { return localStorage.getItem('me-kt-' + k) || ''; } catch (e) { return ''; } };
+  $('url').value = doc('url');
+  $('maNV').value = doc('maNV');
+  var token = '';
+  var pinDung = '';
+
+  function dong(trangThai, tieuDe, chiTiet) {
+    var li = document.createElement('li');
+    var n = document.createElement('span');
+    n.className = 'nhan ' + (trangThai === 'dat' ? 'dat' : trangThai === 'loi' ? 'loi' : 'cho');
+    n.textContent = trangThai === 'dat' ? 'Đạt' : trangThai === 'loi' ? 'Lỗi' : 'Chờ';
+    var m = document.createElement('div');
+    m.className = 'mo-ta';
+    var b = document.createElement('b');
+    b.textContent = tieuDe;
+    var d = document.createElement('div');
+    d.textContent = chiTiet || '';
+    m.appendChild(b);
+    m.appendChild(d);
+    li.appendChild(n);
+    li.appendChild(m);
+    $('ketQua').appendChild(li);
+  }
+
+  function loiCo(loai, thongBao, them) {
+    var e = new Error(thongBao);
+    e.loai = loai;
+    if (them) Object.keys(them).forEach(function (k) { e[k] = them[k]; });
+    return e;
+  }
+
+  // Đọc phản hồi dạng chữ trước: Google có lúc trả một trang web (HTML) thay vì JSON, cần báo rõ mã lỗi.
+  function docPhanHoi(res) {
+    return res.text().then(function (s) {
+      var r;
+      try {
+        r = JSON.parse(s);
+      } catch (e) {
+        var tieuDe = (s.match(/<title>([^<]*)<\/title>/i) || [])[1] || '';
+        throw loiCo('html', 'Google trả về một trang web (mã ' + res.status + (tieuDe ? ', “' + tieuDe.trim() + '”' : '') +
+          ') thay vì dữ liệu.', { ma: res.status });
+      }
+      if (!r || typeof r !== 'object') throw loiCo('la', 'Phản hồi không phải dữ liệu của máy chủ ME.', { tho: s.slice(0, 600) });
+      Object.defineProperty(r, '_tho', { value: s.slice(0, 600) });
+      return r;
+    });
+  }
+
+  // Kết quả của doGet (có kiemTra, không có data hay loi) trả cho một yêu cầu POST: Google đã đổi POST thành GET,
+  // thao tác chưa chạy. Gửi lại cùng mã thao tác (clientId) nên không sợ ghi trùng.
+  function laKetQuaGet(r) {
+    return r.app === 'ME' && !!r.kiemTra && r.data === undefined && r.loi === undefined;
+  }
+
+  function goi(action, data, lan, id) {
+    lan = lan || 1;
+    id = id || 'kt-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    return fetch($('url').value.trim(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: action, token: token, data: data || {}, clientId: id, phienBanApp: '0.0.2-kiemtra' }),
+      redirect: 'follow'
+    }).then(docPhanHoi).then(function (r) {
+      if (laKetQuaGet(r)) {
+        if (lan < 3) {
+          dong('cho', 'Gửi lại thao tác ' + action + ' (lần ' + (lan + 1) + ')',
+            'Google trả về kết quả kiểm tra thay vì kết quả thao tác (yêu cầu bị đổi thành GET, thao tác chưa chạy).');
+          return goi(action, data, lan + 1, id);
+        }
+        throw loiCo('get', 'Gửi 3 lần, Google vẫn trả kết quả kiểm tra thay vì kết quả thao tác ' + action + '.');
+      }
+      if (r.tokenMoi && r.tokenMoi.token) token = r.tokenMoi.token;
+      return r;
+    });
+  }
+
+  // ok mà thiếu data: báo kèm phản hồi thô để tìm lỗi.
+  function canData(r, buoc) {
+    if (r && r.data && typeof r.data === 'object') return r.data;
+    throw loiCo('la', 'Máy chủ trả về thiếu dữ liệu ở bước ' + buoc + '.', { tho: r && r._tho ? r._tho : String(r) });
+  }
+
+  function loiChu(r) { return r && r.loi ? r.loi.vi + '\n' + r.loi.zh + ' (' + r.loi.ma + ')' : 'Không rõ'; }
+
+  function gioVi(iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] : String(iso || '');
+  }
+
+  function moNut() {
+    $('chay').disabled = false;
+    $('luuPin').disabled = false;
+  }
+
+  function loiMang(e) {
+    var loai = e && e.loai;
+    if (loai === 'dung') { moNut(); return; }
+    var tieuDe;
+    var chiTiet;
+    if (loai === 'html') {
+      tieuDe = 'Google trả về trang lỗi';
+      chiTiet = e.message + '\n' + (e.ma === 404
+        ? 'Hay gặp trong vài phút đầu sau khi triển khai: đợi một lát rồi bấm Kiểm tra lại. Nếu vẫn lỗi, chép lại link bằng nút Sao chép trong Triển khai → Quản lý tùy chọn triển khai.'
+        : 'Đợi một lát rồi bấm Kiểm tra lại. Nếu vẫn lỗi, chụp màn hình này gửi người lập trình.');
+    } else if (loai === 'get') {
+      tieuDe = 'Google chưa chuyển được thao tác tới máy chủ';
+      chiTiet = e.message + '\nĐợi một lát rồi bấm Kiểm tra lại.';
+    } else if (loai === 'la') {
+      tieuDe = 'Kết quả lạ từ máy chủ';
+      chiTiet = e.message + '\nPhản hồi: ' + e.tho + '\nChụp màn hình này gửi người lập trình.';
+    } else if (e instanceof TypeError && /fetch|network|load/i.test(String(e.message))) {
+      tieuDe = 'Không gọi được Web App';
+      chiTiet = String(e.message) + '\nKiểm tra: link đúng và kết thúc bằng /exec; lúc triển khai chọn “Người có quyền truy cập: Bất kỳ ai”; ' +
+        'mở tệp này bằng Chrome trên máy tính (không mở trong khung xem trước của ứng dụng chat).';
+    } else {
+      tieuDe = 'Lỗi trong công cụ kiểm tra';
+      chiTiet = String(e && e.message || e) + '\nChụp màn hình này gửi người lập trình.';
+    }
+    dong('loi', tieuDe, chiTiet);
+    moNut();
+  }
+
+  function dung() { return loiCo('dung', 'dung'); }
+
+  $('chay').addEventListener('click', function () {
+    var url = $('url').value.trim();
+    var maNV = $('maNV').value.trim().toUpperCase();
+    var pin = $('pin').value.trim();
+    $('ketQua').textContent = '';
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { dong('loi', 'Địa chỉ Web App chưa đúng', 'Cần dạng https://script.google.com/macros/s/…/exec'); return; }
+    if (!maNV) { dong('loi', 'Chưa nhập mã nhân viên', 'Ghi mã NV của tài khoản quản trị, đúng như trong sheet NguoiDung.'); return; }
+    if (!/^\d{6}$/.test(pin)) { dong('loi', 'PIN gồm 6 số', ''); return; }
+    luu('url', url);
+    luu('maNV', maNV);
+    token = '';
+    pinDung = pin;
+    $('chay').disabled = true;
+    $('doiPin').classList.add('an');
+    fetch(url, { redirect: 'follow' }).then(docPhanHoi).then(function (r) {
+      var kt = r.kiemTra || {};
+      if (r.ok) dong('dat', 'Máy chủ chạy, phiên bản ' + r.mayChu, 'Đủ ' + kt.soSheet + '/' + kt.canSheet + ' sheet, cấu trúc phiên bản ' + kt.cauTruc + ', đã có quản trị cấp 1.');
+      else dong('loi', 'Máy chủ chạy nhưng cài đặt chưa xong', (kt.huongDan || loiChu(r)) + '\n' + JSON.stringify(kt));
+      return goi('dangNhap', { maNV: maNV, pin: pin });
+    }).then(function (r) {
+      if (!r.ok) { dong('loi', 'Đăng nhập', loiChu(r)); throw dung(); }
+      var d = canData(r, 'đăng nhập');
+      token = d.token;
+      dong('dat', 'Đăng nhập ' + d.hoSo.MaNV + ' – ' + d.hoSo.HoTen, 'Cấp ' + d.hoSo.Cap + '. Phiên đăng nhập dùng đến ' + gioVi(d.hetHan) + '.');
+      if (d.phaiDoiPin) {
+        dong('cho', 'Cần đổi PIN', 'Đây là PIN tạm. Đặt PIN của riêng bạn ở khung phía trên rồi bấm “Đổi PIN và kiểm tra tiếp”.');
+        $('doiPin').classList.remove('an');
+        $('pinMoi').focus();
+        $('chay').disabled = false;
+        return;
+      }
+      kiemTiep();
+    }).catch(loiMang);
+  });
+
+  $('luuPin').addEventListener('click', function () {
+    var a = $('pinMoi').value.trim();
+    var b = $('pinMoi2').value.trim();
+    if (!/^\d{6}$/.test(a)) { dong('loi', 'PIN mới gồm 6 số', ''); return; }
+    if (a !== b) { dong('loi', 'Hai lần nhập PIN mới không giống nhau', ''); return; }
+    $('luuPin').disabled = true;
+    goi('doiPin', { pinCu: pinDung, pinMoi: a }).then(function (r) {
+      $('luuPin').disabled = false;
+      if (!r.ok) { dong('loi', 'Đổi PIN', loiChu(r)); return; }
+      var d = canData(r, 'đổi PIN');
+      token = d.token;
+      pinDung = a;
+      $('pin').value = '';
+      $('doiPin').classList.add('an');
+      $('pinMoi').value = '';
+      $('pinMoi2').value = '';
+      dong('dat', 'Đã đổi PIN', 'Từ nay đăng nhập bằng PIN mới. Các máy khác đang đăng nhập bằng tài khoản này đã bị đăng xuất.');
+      kiemTiep();
+    }).catch(loiMang);
+  });
+
+  function kiemTiep() {
+    var moc = '';
+    goi('taiBanDau').then(function (r) {
+      if (!r.ok) { dong('loi', 'Tải dữ liệu lần đầu', loiChu(r)); throw dung(); }
+      var d = canData(r, 'tải dữ liệu lần đầu');
+      moc = d.moc;
+      var ds = Object.keys(d.bang || {}).map(function (k) { return k + ' ' + d.bang[k].dong.length; });
+      dong('dat', 'Tải dữ liệu lần đầu (' + r.ms + ' ms)', 'Số dòng: ' + ds.join(' · ') + '\nQuyền: ' + ((d.hoSo && d.hoSo.quyen) || []).join(', '));
+      return goi('dongBo', { moc: moc });
+    }).then(function (r) {
+      if (!r.ok) { dong('loi', 'Đồng bộ', loiChu(r)); throw dung(); }
+      var d = canData(r, 'đồng bộ');
+      var n = Object.keys(d.bang || {}).length;
+      dong(d.taiLai ? 'loi' : 'dat', 'Đồng bộ (' + r.ms + ' ms)', d.taiLai ? 'Máy chủ yêu cầu tải lại – thử lại sau ít phút.' : (n ? 'Có ' + n + ' bảng mới đổi trong 5 phút qua.' : 'Không có gì mới.'));
+      return goi('tongHopDienNuoc', {});
+    }).then(function (r) {
+      if (!r.ok) { dong('loi', 'Tổng hợp điện nước', loiChu(r)); throw dung(); }
+      var d = canData(r, 'tổng hợp điện nước');
+      var dien = d.dien || {};
+      var nuoc = d.nuoc || {};
+      var td = d.tienDo || {};
+      dong('dat', 'Tổng hợp điện nước tháng ' + d.thang + ' (' + r.ms + ' ms)',
+        'Điện ' + Number(dien.tong || 0).toLocaleString('vi-VN') + ' kWh, nước ' + Number(nuoc.tong || 0).toLocaleString('vi-VN') + ' m³ (chưa có công tơ thì bằng 0). ' +
+        'Ghi hôm nay ' + (td.daGhi || 0) + '/' + (td.tong || 0) + ' công tơ.');
+      dong('dat', 'Xong: máy chủ sẵn sàng cho app', 'Giữ lại địa chỉ Web App để dán vào app ở bước 3.');
+      moNut();
+    }).catch(loiMang);
+  }
+})();
+</script>
+</body>
+</html>

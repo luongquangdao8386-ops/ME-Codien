@@ -1,13 +1,16 @@
 /**
  * ME – Quản lý Cơ điện · 机电管理系统
- * BaoMat.gs — băm PIN, kiểm PIN, tạo PIN tạm, chuẩn hóa mã nhân viên.
- * Bước 2 sẽ thêm token đăng nhập (ký HMAC-SHA256, thu hồi bằng TokenVer) vào file này.
+ * BaoMat.gs — băm PIN, kiểm PIN, tạo PIN tạm, chuẩn hóa mã nhân viên, token đăng nhập.
  *
  * Khóa bí mật nằm trong Script Properties (KHOA_PIN, KHOA_TOKEN), do menu ME → Cài đặt tạo một lần.
  * Không bao giờ viết khóa, mật khẩu hay PIN vào code: mã nguồn app để công khai trên GitHub.
  *
  * Bản băm PIN lưu dạng "v1$<số vòng>$<base64>": HMAC-SHA256 lặp nhiều vòng, khóa là KHOA_PIN,
  * trộn muối riêng của từng người (cột PinSalt). Đổi số vòng sau này không làm hỏng PIN cũ.
+ *
+ * Token đăng nhập (bước 2): "me1.<nội dung>.<chữ ký>", nội dung là JSON { n: mã NV, v: TokenVer, i: lúc cấp,
+ * e: hết hạn (giây) }, chữ ký HMAC-SHA256 bằng KHOA_TOKEN. Token có hạn dùng (CauHinh THOI_HAN_PHIEN_NGAY);
+ * tăng cột TokenVer của một người là mọi token cũ của người đó hết hiệu lực trên mọi máy.
  */
 
 const PIN_SO_VONG = 200;
@@ -118,4 +121,57 @@ function taoPinTam_() {
 /** Mã NV: bỏ khoảng trắng, chữ in hoa, chuẩn Unicode NFC. */
 function chuanMaNV_(s) {
   return String(s === null || s === undefined ? '' : s).normalize('NFC').replace(/\s+/g, '').toUpperCase();
+}
+
+// ───────────────────────── Token đăng nhập (bước 2) ─────────────────────────
+
+const TOKEN_PHIEN_BAN = 'me1';
+
+/** Base64 an toàn cho URL, bỏ dấu = ở cuối. */
+function base64Url_(duLieu) {
+  return Utilities.base64EncodeWebSafe(duLieu).replace(/=+$/, '');
+}
+
+function kyToken_(noiDung) {
+  return base64Url_(Utilities.computeHmacSha256Signature(TOKEN_PHIEN_BAN + '.' + noiDung, layKhoa_('KHOA_TOKEN')));
+}
+
+/** Cấp token cho người dùng (cần MaNV, TokenVer); soNgay = số ngày hiệu lực. Trả { token, hetHan }. */
+function taoToken_(user, soNgay) {
+  const bayGioGiay = Math.floor(Date.now() / 1000);
+  const hetHan = bayGioGiay + Math.round(Math.max(Number(soNgay) || 30, 0.01) * 86400);
+  const noiDung = base64Url_(Utilities.newBlob(JSON.stringify({
+    n: String(user.MaNV), v: Number(user.TokenVer) || 0, i: bayGioGiay, e: hetHan, r: taoChuoiNgauNhien_().slice(0, 8)
+  })).getBytes());
+  return { token: TOKEN_PHIEN_BAN + '.' + noiDung + '.' + kyToken_(noiDung), hetHan: bayGio_(new Date(hetHan * 1000)) };
+}
+
+/** Đọc token: kiểm chữ ký và hạn dùng; sai hoặc hết hạn trả null. Chưa kiểm người dùng. */
+function moToken_(token) {
+  const p = String(token || '').split('.');
+  if (p.length !== 3 || p[0] !== TOKEN_PHIEN_BAN || !p[1] || !p[2] || p[1].length > 1000) return null;
+  if (!soSanhAnToan_(kyToken_(p[1]), p[2])) return null;
+  let tai;
+  try {
+    const dem = (4 - (p[1].length % 4)) % 4;
+    tai = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(p[1] + '===='.slice(0, dem))).getDataAsString('UTF-8'));
+  } catch (e) {
+    return null;
+  }
+  if (!tai || typeof tai.n !== 'string' || !(Number(tai.e) > Date.now() / 1000)) return null;
+  return tai;
+}
+
+/**
+ * Kiểm token của một yêu cầu: chữ ký, hạn dùng, người dùng còn hoạt động và TokenVer khớp.
+ * Trả { user, tai }; sai thì báo lỗi PHIEN_HET_HAN để app đăng nhập lại.
+ */
+function kiemTraToken_(token) {
+  const tai = moToken_(token);
+  if (!tai) throw loi_('PHIEN_HET_HAN');
+  const d = timNguoiDung_(tai.n);
+  if (!d || laDung_(d.DaXoa)) throw loi_('PHIEN_HET_HAN');
+  if (String(d.TrangThai || '') === 'NGUNG') throw loi_('TAI_KHOAN_NGUNG');
+  if ((Number(d.TokenVer) || 0) !== Number(tai.v)) throw loi_('PHIEN_HET_HAN');
+  return { user: taoNguoiDung_(d), tai: tai };
 }

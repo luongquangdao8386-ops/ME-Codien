@@ -16,6 +16,9 @@
  *   - Cấp PIN tạm cho dòng đang chọn   → capPinTamDongChon()   (đứng ở sheet NguoiDung)
  *   - Sao lưu ngay                     → saoLuuHangTuan()      (cũng tự chạy mỗi Chủ nhật, 2–3 giờ sáng)
  * Sửa tay trong sheet: onEdit() tự ghi CapNhatLuc, CapNhatBoi = SUA_TAY và tăng PhienBan để app nhận thay đổi.
+ *
+ * Bước 2: mọi lần ghi ở tệp này (và sửa tay) báo cho máy chủ Code.gs biết bảng vừa đổi (baoBangDoi_),
+ * để máy chủ bỏ bộ nhớ đệm và app đồng bộ đúng; chữ bắt đầu bằng = + - @ được chặn để Sheets không hiểu là công thức.
  */
 
 const TEN_THU_MUC_ANH = 'ME – Ảnh';
@@ -407,6 +410,8 @@ function caiDat_(ss) {
 
   ghiNhatKyCaiDat_(ss, NGUOI_CAI_DAT, 'CAI_DAT', '', '',
     JSON.stringify({ taoSheet: soTao, themCot: soThemCot, khoaMoi: khoaMoi, duLieuMau: gieo, canhBao: bc.canhBao.length }));
+  // Cấu trúc có thể vừa đổi (thêm cột): báo máy chủ làm mới mọi bảng, app sẽ tải lại phần thay đổi.
+  BANG.forEach(function (def) { baoBangDoi_(def.ten); });
   ss.setActiveSheet(ss.getSheetByName('NguoiDung'));
   return bc;
 }
@@ -844,8 +849,21 @@ function onEdit(e) {
     sh.getRange(dau, iLuc + 1, soDong, 1).setValues(ra.map(function (x) { return [x[0]]; }));
     sh.getRange(dau, iBoi + 1, soDong, 1).setValues(ra.map(function (x) { return [x[1]]; }));
     sh.getRange(dau, iPB + 1, soDong, 1).setValues(ra.map(function (x) { return [x[2]]; }));
+    baoBangDoi_(sh.getName());
   } catch (err) {
     console.error('onEdit: ' + err);
+  }
+}
+
+/**
+ * Báo cho máy chủ (Code.gs, bước 2) biết một bảng vừa đổi: máy chủ bỏ bộ nhớ đệm của bảng đó
+ * và lần đồng bộ sau app nhận dòng mới. Chưa có Code.gs thì bỏ qua.
+ */
+function baoBangDoi_(ten) {
+  try {
+    if (typeof danhDauBangDoi_ === 'function') danhDauBangDoi_(ten);
+  } catch (e) {
+    console.warn('Không đánh dấu được bảng ' + ten + ' vừa đổi: ' + e);
   }
 }
 
@@ -867,7 +885,7 @@ function docBangCaiDat_(sh) {
   return { tieuDe: tieuDe, dong: dong };
 }
 
-/** Giá trị đúng kiểu cột trước khi ghi. */
+/** Giá trị đúng kiểu cột trước khi ghi. Chữ bắt đầu bằng = + - @ được thêm dấu nháy để không thành công thức. */
 function giaTriO_(def, cot, v) {
   if (v === null || v === undefined) return '';
   const k = kieuCot_(def, cot);
@@ -877,7 +895,12 @@ function giaTriO_(def, cot, v) {
     return isNaN(n) ? '' : n;
   }
   if (k === 'dung') return v === '' ? '' : laDung_(v);
-  return String(v);
+  return chanCongThuc_(String(v));
+}
+
+/** Chuỗi bắt đầu bằng = + - @ thì thêm dấu nháy đơn phía trước (Sheets không hiểu là công thức). */
+function chanCongThuc_(s) {
+  return typeof s === 'string' && /^[=+\-@]/.test(s) ? "'" + s : s;
 }
 
 /** Thêm nhiều dòng vào cuối sheet trong một lần ghi; tự điền cột hệ thống. Trả số dòng đã thêm. */
@@ -898,6 +921,7 @@ function themDongCaiDat_(sh, def, tieuDe, ds, nguoi) {
   const can = dau + hang.length - 1;
   if (sh.getMaxRows() < can) sh.insertRowsAfter(sh.getMaxRows(), can - sh.getMaxRows());
   sh.getRange(dau, 1, hang.length, tieuDe.length).setValues(hang);
+  baoBangDoi_(sh.getName());
   return hang.length;
 }
 
@@ -905,7 +929,7 @@ function themDongCaiDat_(sh, def, tieuDe, ds, nguoi) {
 function suaDongCaiDat_(sh, def, tieuDe, soDong, thayDoi, nguoi) {
   const vung = sh.getRange(soDong, 1, 1, tieuDe.length);
   const cu = vung.getValues()[0];
-  const moi = cu.slice();
+  const moi = cu.map(function (v, i) { return kieuCot_(def, tieuDe[i]) === 'chu' ? chanCongThuc_(v) : v; });
   Object.keys(thayDoi).forEach(function (c) {
     const i = tieuDe.indexOf(c);
     if (i >= 0) moi[i] = giaTriO_(def, c, thayDoi[c]);
@@ -921,6 +945,7 @@ function suaDongCaiDat_(sh, def, tieuDe, soDong, thayDoi, nguoi) {
     if (iXoa >= 0 && cu[iXoa] === '') moi[iXoa] = false;
   }
   vung.setValues([moi]);
+  baoBangDoi_(sh.getName());
 }
 
 function ghiNhatKyCaiDat_(ss, maNV, hanhDong, bang, maBanGhi, truocSau) {
